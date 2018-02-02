@@ -1,0 +1,15 @@
+[package]
+name = "axpy"
+version = "0.1.0"
+authors = ["Jason Dark <email@jkdark.com>"]
+
+description = "Macro for auto-vectorizing n-ary linear combinations"
+categories = ["no-std", "rust-patterns", "science"]
+homepage = "https://github.com/jasondark/axpy"
+repository = "https://github.com/jasondark/axpy"
+license = "MIT OR Apache-2.0 OR BSD-2-Clause"
+readme = "README.md"
+keywords = ["vector", "linear", "combination", "axpy"]
+
+[dependencies]
+

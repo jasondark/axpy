@@ -2,6 +2,4 @@
 /target/
 **/*.rs.bk
 Cargo.lock
-README.md
-LICENSE*
 

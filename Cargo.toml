@@ -1,6 +1,6 @@
 [package]
 name = "axpy"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Jason Dark <email@jkdark.com>"]
 
 description = "Macro for auto-vectorizing n-ary linear combinations"

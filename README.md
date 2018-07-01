@@ -11,7 +11,7 @@ A macro-based alternative to expression templates for efficient n-ary linear com
 
         // this becomes:
         // for (z, (x, y)) in z.iter_mut().zip(x.iter().zip(y.iter())) {
-        //     *z = a * *x + 1. * *z - 2. * *y + -0.;
+        //     *z = a * *x + 1. * *z - 2. * *y;
         // }
     }
 
@@ -36,6 +36,7 @@ Unless you explicitly state otherwise, any contribution intentionally submitted 
 
 ## Versions
 
+* 0.3.0 -- restored ability to use integer types by rethinking macro patterns
 * 0.2.0 -- simplification of macro by relying on further (verified) optimizations (e.g. 1*x and x-0 are no-ops)
 * 0.1.0 -- initial implementation of macro
 

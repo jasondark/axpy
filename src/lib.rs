@@ -1,6 +1,7 @@
 #![no_std]
 
-/// Exposes linear combinations of slice-like objects of Copy values to LLVM's auto-vectorizer
+/// Exposes linear combinations of slice-like objects of Copy values to LLVM's auto-vectorizer,
+/// a.k.a. write vector expressions as you would in Matlab or Fortran.
 ///
 /// Linear combinations of vectors don't on their own lend themselves to nice optimizations. For
 /// example, consider `x+y+z`. Since the operator overloads are binary, this naively maps to
@@ -35,8 +36,8 @@
 #[macro_export]
 macro_rules! axpy {
     // point of entry to the macro: we immediately hand the input off to the parser (prefix=!)
-    // `- 0.` is used as terminal indicator
-    [$y:ident $assign:tt $($rest:tt)+] => { axpy![! $y $assign () $($rest)* - 0.] };
+    // `+ .` is used as terminal indicator
+    [$y:ident $assign:tt $($rest:tt)+] => { axpy![! $y $assign () $($rest)* + .] };
 
 
     // parser rules: recursively perform the following transformations to the tokens
@@ -47,29 +48,29 @@ macro_rules! axpy {
     // implementation note: 3 tokens are required to fully disambiguate the patterns,
     //                      that's why we seemingly peel back unnecessary tokens.
     [! $y:ident $assign:tt ($($parsed:tt)*)   $x:ident + $($rest:tt)+]       => // "x + ..."
-        { axpy![! $y $assign ($($parsed)*   1.  $x) + $($rest)*] };
+        { axpy![! $y $assign ($($parsed)*     0 + $x) + $($rest)*] };
     [! $y:ident $assign:tt ($($parsed:tt)*)   $x:ident - $($rest:tt)+]       => // "x - ..."
-        { axpy![! $y $assign ($($parsed)*   1.  $x) - $($rest)*] };
+        { axpy![! $y $assign ($($parsed)*     0 + $x) - $($rest)*] };
     [! $y:ident $assign:tt ($($parsed:tt)*) + $x:ident + $($rest:tt)+]       => // "+ x + ..."
-        { axpy![! $y $assign ($($parsed)*   1.  $x) + $($rest)*] };
+        { axpy![! $y $assign ($($parsed)*     0 + $x) + $($rest)*] };
     [! $y:ident $assign:tt ($($parsed:tt)*) + $x:ident - $($rest:tt)+]       => // "+ x - ..."
-        { axpy![! $y $assign ($($parsed)*   1.  $x) - $($rest)*] };
+        { axpy![! $y $assign ($($parsed)*     0 + $x) - $($rest)*] };
     [! $y:ident $assign:tt ($($parsed:tt)*) - $x:ident + $($rest:tt)+]       => // "- x + ..."
-        { axpy![! $y $assign ($($parsed)* (-1.) $x) + $($rest)*] };
+        { axpy![! $y $assign ($($parsed)*     0 - $x) + $($rest)*] };
     [! $y:ident $assign:tt ($($parsed:tt)*) - $x:ident - $($rest:tt)+]       => // "- x - ..."
-        { axpy![! $y $assign ($($parsed)* (-1.) $x) - $($rest)*] };
+        { axpy![! $y $assign ($($parsed)*     0 - $x) - $($rest)*] };
     [! $y:ident $assign:tt ($($parsed:tt)*)   $a:tt * $x:ident $($rest:tt)+] => // "a * x ..."
-        { axpy![! $y $assign ($($parsed)* $a $x) $($rest)*] };
+        { axpy![! $y $assign ($($parsed)*    $a * $x) $($rest)*] };
     [! $y:ident $assign:tt ($($parsed:tt)*) + $a:tt * $x:ident $($rest:tt)+] => // "+ a * x ..."
-        { axpy![! $y $assign ($($parsed)* $a $x) $($rest)*] };
+        { axpy![! $y $assign ($($parsed)*    $a * $x) $($rest)*] };
     [! $y:ident $assign:tt ($($parsed:tt)*) - $a:tt * $x:ident $($rest:tt)+] => // "- a * x ..."
-        { axpy![! $y $assign ($($parsed)* (-$a) $x) $($rest)*] };
+        { axpy![! $y $assign ($($parsed)* (-$a) * $x) $($rest)*] };
 
     // upon conclusion of parsing, we hand off to iterator construction
     // (prefix=@) and expression constructor (prefix=#)
-    [! $y:ident $assign:tt ($($parsed:tt)+) - 0.] => {
+    [! $y:ident $assign:tt ($($parsed:tt)+) + .] => {
         for (car,cdr) in axpy![@ $y; $y.iter_mut(); $($parsed)*] {
-            axpy![# $y; car; cdr; (*car $assign) $($parsed)*];
+            *car $assign axpy![# $y; car; cdr; () $($parsed)*];
         }
     };
 
@@ -78,7 +79,7 @@ macro_rules! axpy {
     // iterator for x != y, and do nothing when x = y
     // (since y has already been borrowed mutably)
     [@ $y:ident; $iter:expr; ] => { $iter.map(|x| (x,)) };
-    [@ $y:ident; $iter:expr; $a:tt $x:ident $($rest:tt)*] => {
+    [@ $y:ident; $iter:expr; $a:tt $op:tt $x:ident $($rest:tt)*] => {
         {
             macro_rules! eval {
                 ($y $y) => { axpy![@ $y; $iter; $($rest)*] };
@@ -93,18 +94,38 @@ macro_rules! axpy {
     // with the correct combination of obj.1. ... .1.0, e.g. peel back the zip()'s.
 
     // Base case: when done, emit new expression
-    // (appending -0 to be well-formed and optimize to a no-op)
-    [# $y:ident; $car:expr; $cdr:expr; ($($parsed:tt)+)] => { $($parsed)* -0.};
+    [# $y:ident; $car:ident; $cdr:expr; (+ $($parsed:tt)+)] => { $($parsed)* };
 
-    // General case
-    [# $y:ident; $car:expr; $cdr:expr; ($($parsed:tt)*) $a:tt $x:ident $($rest:tt)*] => {
+    // Case: + x
+    [# $y:ident; $car:ident; $cdr:expr; ($($parsed:tt)*) 0 + $x:ident $($rest:tt)*] => {
         {
             macro_rules! eval {
-                ($y $y) => { axpy![# $y; $car; $cdr  ; ($($parsed)* $a * *$car   +) $($rest)*] };
-                ($x $y) => { axpy![# $y; $car; $cdr.1; ($($parsed)* $a * *$cdr.0 +) $($rest)*] };
+                ($y $y) => { axpy![# $y; $car; $cdr  ; ($($parsed)* + *$car  ) $($rest)*] };
+                ($x $y) => { axpy![# $y; $car; $cdr.1; ($($parsed)* + *$cdr.0) $($rest)*] };
             }
             eval!($x $y)
         }
     };
+    // Case: - x
+    [# $y:ident; $car:ident; $cdr:expr; ($($parsed:tt)*) 0 - $x:ident $($rest:tt)*] => {
+        {
+            macro_rules! eval {
+                ($y $y) => { axpy![# $y; $car; $cdr  ; ($($parsed)* + - *$car  ) $($rest)*] };
+                ($x $y) => { axpy![# $y; $car; $cdr.1; ($($parsed)* + - *$cdr.0) $($rest)*] };
+            }
+            eval!($x $y)
+        }
+    };
+    // Case: + a * x
+    [# $y:ident; $car:ident; $cdr:expr; ($($parsed:tt)*) $a:tt * $x:ident $($rest:tt)*] => {
+        {
+            macro_rules! eval {
+                ($y $y) => { axpy![# $y; $car; $cdr  ; ($($parsed)* + $a * *$car  ) $($rest)*] };
+                ($x $y) => { axpy![# $y; $car; $cdr.1; ($($parsed)* + $a * *$cdr.0) $($rest)*] };
+            }
+            eval!($x $y)
+        }
+    };
+
 }
 
